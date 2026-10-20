@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qualidade DPU - Modo Offline</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Biblioteca mágica que permite criar arquivos ZIP no tablet offline -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <style>
+        body { background-color: #f3f2f1; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .form-header { background-color: #005b9f; color: white; padding: 30px; border-radius: 8px 8px 0 0; }
+        .question-card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 4px solid #005b9f; }
+        .btn-check:checked + .btn-outline-secondary { background-color: #6c757d; color: white; }
+        .btn-check:checked + .btn-outline-danger { background-color: #dc3545; color: white; }
+        .btn-check:checked + .btn-outline-success { background-color: #198754; color: white; }
+        
+        .thumb-container { position: relative; width: 65px; height: 65px; border-radius: 6px; overflow: hidden; border: 1px solid #ced4da; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; margin-right: 5px; margin-bottom: 5px; display: inline-block;}
+        .thumb-container img { width: 100%; height: 100%; object-fit: cover; cursor: pointer; }
+        .thumb-remove { position: absolute; top: 0; right: 0; background: rgba(220, 53, 69, 0.9); color: white; border: none; font-size: 11px; width: 22px; height: 22px; line-height: 22px; text-align: center; cursor: pointer; border-bottom-left-radius: 4px; }
+        
+        #statusConexao { font-size: 0.85rem; padding: 5px 10px; border-radius: 20px; font-weight: bold; }
+    </style>
+</head>
+<body class="p-4">
+
+<div class="container" style="max-width: 800px;">
+    <div class="form-header shadow-sm mb-4 d-flex justify-content-between align-items-center">
+        <div>
+            <h2 class="fw-bold m-0"><i class="fas fa-tools me-2"></i> Inspeção Offline</h2>
+            <p class="m-0 mt-2 opacity-75">100% autônomo no tablet. Os dados geram um ZIP.</p>
+        </div>
+        <div class="text-end">
+            <span id="statusConexao" class="bg-success text-white"><i class="fas fa-wifi"></i> Online</span><br>
+        </div>
+    </div>
+
+    <form id="formQualidade" onchange="salvarRascunho()">
+        <div class="question-card">
+            <h6 class="fw-bold mb-3">1. Localizar Motor para Inspeção <span class="text-danger">*</span></h6>
+            <div class="input-group mb-2">
+                <input type="text" id="busca_sv" class="form-control" placeholder="Digite o SV (Ex: 8052)" required>
+                <button type="button" class="btn btn-primary fw-bold" onclick="iniciarInspecao()">Iniciar / Retomar</button>
+            </div>
+            <div id="info_motor" class="alert d-none mb-0 py-2"></div>
+            <input type="hidden" id="motor_id" value="OFFLINE_MODE" required>
+        </div>
+
+        <div id="areaFormulario" class="d-none">
+            <div class="question-card">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="fw-bold mb-1">Data de Verificação:</label>
+                        <input type="date" id="data_verificacao" class="form-control" required>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="fw-bold mb-1">Nome do Inspetor:</label>
+                        <input type="text" id="identificacao_se" class="form-control border-primary bg-light" placeholder="Nome ou Nº de Série" required>
+                    </div>
+                </div>
+            </div>
+
+            <div id="areaPerguntas"></div>
+
+            <div class="question-card">
+                <label class="fw-bold mb-2">Comentário Geral</label>
+                <textarea id="comentario_geral" class="form-control" rows="3" placeholder="Observações finais sobre o SV..."></textarea>
+            </div>
+
+            <button type="button" id="btnExportar" class="btn btn-dark btn-lg w-100 fw-bold shadow mb-5 py-3" onclick="gerarZipOffline()">
+                <i class="fas fa-file-archive me-2"></i> FINALIZAR E BAIXAR ARQUIVO ZIP
+            </button>
+        </div>
+    </form>
+</div>
+
+<!-- Modal Foto Zoom -->
+<div class="modal fade" id="modalFotoZoom" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content bg-transparent border-0">
+            <div class="modal-header border-0 pb-0">
+                <button type="button" class="btn-close btn-close-white ms-auto bg-dark p-2" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center p-0 mt-2">
+                <img id="imgZoom" src="" class="img-fluid rounded shadow-lg" style="max-height: 85vh; border: 4px solid white;">
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // ==========================================
+    // 1. BANCO DE DADOS OFFLINE (IndexedDB)
+    // ==========================================
+    let db;
+    let arquivosMemoria = {};
+    const requestDB = indexedDB.open("QualidadeDB", 1);
+
+    requestDB.onupgradeneeded = function(event) {
+        db = event.target.result;
+        if (!db.objectStoreNames.contains("rascunhos")) {
+            db.createObjectStore("rascunhos", { keyPath: "sv" });
+        }
+    };
+    requestDB.onsuccess = function(event) { db = event.target.result; };
+
+    function atualizarStatusRede() {
+        const badge = document.getElementById('statusConexao');
+        if (navigator.onLine) {
+            badge.className = "bg-success text-white";
+            badge.innerHTML = '<i class="fas fa-wifi"></i> Online';
+        } else {
+            badge.className = "bg-danger text-white";
+            badge.innerHTML = '<i class="fas fa-plane"></i> Desconectado (Modo Nativo)';
+        }
+    }
+    window.addEventListener('online', atualizarStatusRede);
+    window.addEventListener('offline', atualizarStatusRede);
+    atualizarStatusRede();
+
+    // ==========================================
+    // 2. CONSTRUÇÃO DO FORMULÁRIO (Exemplo Prático)
+    // ==========================================
+    const perguntas = [
+        { id: "p1", texto: "Etiqueta de passagem do motor em banco" },
+        { id: "p2", texto: "Identificação metálica com SV do motor" },
+        { id: "p3", texto: "Motor com Óleo?" },
+        { id: "p4", texto: "Verificar se não há peças faltantes" },
+        { id: "p5", texto: "As instrumentações estão coerentes?" }
+    ];
+
+    const area = document.getElementById("areaPerguntas");
+    perguntas.forEach((p, index) => {
+        arquivosMemoria[p.id] = [];
+        area.innerHTML += `
+            <div class="question-card" id="card_${p.id}">
+                <h6 class="fw-bold mb-3 text-dark">${index + 1}. ${p.texto}</h6>
+                <div class="btn-group w-100 mb-3 shadow-sm" role="group">
+                    <input type="radio" class="btn-check" name="resp_${p.id}" id="na_${p.id}" value="N/A">
+                    <label class="btn btn-outline-secondary fw-bold" for="na_${p.id}">N/A</label>
+                    <input type="radio" class="btn-check" name="resp_${p.id}" id="nok_${p.id}" value="NOK/NÃO">
+                    <label class="btn btn-outline-danger fw-bold" for="nok_${p.id}">NOK / NÃO</label>
+                    <input type="radio" class="btn-check" name="resp_${p.id}" id="ok_${p.id}" value="OK/SIM">
+                    <label class="btn btn-outline-success fw-bold" for="ok_${p.id}">OK / SIM</label>
+                </div>
+                <div class="row g-2 align-items-start">
+                    <div class="col-md-6">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text bg-light"><i class="fas fa-camera"></i></span>
+                            <input type="file" class="form-control" accept="image/*" multiple onchange="adicionarFotos(event, '${p.id}')">
+                        </div>
+                        <div id="preview_${p.id}" class="mt-2"></div>
+                    </div>
+                    <div class="col-md-6">
+                        <input type="text" class="form-control form-control-sm" id="obs_${p.id}" placeholder="Comentar..." onkeyup="salvarRascunho()">
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    document.getElementById('data_verificacao').valueAsDate = new Date();
+
+    // ==========================================
+    // 3. INICIAR INSPEÇÃO
+    // ==========================================
+    function iniciarInspecao() {
+        const sv = document.getElementById('busca_sv').value.trim();
+        if(!sv) return;
+
+        const info = document.getElementById('info_motor');
+        info.innerHTML = `✅ Criando dossiê local para o SV: <b>${sv}</b>.`;
+        info.className = 'alert alert-info mb-0 py-2';
+
+        document.getElementById('areaFormulario').classList.remove('d-none');
+        carregarRascunho(sv);
+    }
+
+    // ==========================================
+    // 4. CAPTURA DE FOTOS E AUTO-SAVE LOCAL
+    // ==========================================
+    function adicionarFotos(event, perguntaId) {
+        const input = event.target;
+        Array.from(input.files).forEach(file => {
+            file.uid = Math.random().toString(36).substr(2, 9);
+            arquivosMemoria[perguntaId].push(file);
+        });
+        input.value = ""; 
+        renderizarMiniaturas(perguntaId);
+        salvarRascunho();
+    }
+
+    function renderizarMiniaturas(perguntaId) {
+        const container = document.getElementById(`preview_${perguntaId}`);
+        container.innerHTML = "";
+        arquivosMemoria[perguntaId].forEach(file => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const imgDataUrl = e.target.result;
+                const div = document.createElement('div');
+                div.className = 'thumb-container';
+                div.innerHTML = `
+                    <img src="${imgDataUrl}" onclick="verFotoModal('${imgDataUrl}')">
+                    <button type="button" class="thumb-remove" onclick="removerFoto('${perguntaId}', '${file.uid}')"><i class="fas fa-times"></i></button>
+                `;
+                container.appendChild(div);
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    function removerFoto(perguntaId, fileUid) {
+        arquivosMemoria[perguntaId] = arquivosMemoria[perguntaId].filter(f => f.uid !== fileUid);
+        renderizarMiniaturas(perguntaId);
+        salvarRascunho();
+    }
+
+    function verFotoModal(src) {
+        document.getElementById('imgZoom').src = src;
+        new bootstrap.Modal(document.getElementById('modalFotoZoom')).show();
+    }
+
+    function salvarRascunho() {
+        const sv = document.getElementById('busca_sv').value.trim();
+        if (!sv || !db) return;
+
+        const respostas = {};
+        perguntas.forEach(p => {
+            const radio = document.querySelector(`input[name="resp_${p.id}"]:checked`);
+            respostas[p.id] = {
+                pergunta: p.texto,
+                resposta: radio ? radio.value : "",
+                comentario: document.getElementById(`obs_${p.id}`).value
+            };
+        });
+
+        const dadosParaSalvar = {
+            sv: sv,
+            data_verificacao: document.getElementById('data_verificacao').value,
+            identificacao_se: document.getElementById('identificacao_se').value,
+            comentario_geral: document.getElementById('comentario_geral').value,
+            respostas: respostas,
+            fotos: arquivosMemoria
+        };
+
+        const store = db.transaction(["rascunhos"], "readwrite").objectStore("rascunhos");
+        store.put(dadosParaSalvar);
+    }
+
+    function carregarRascunho(sv) {
+        if (!db) return;
+        const request = db.transaction(["rascunhos"], "readonly").objectStore("rascunhos").get(sv);
+        request.onsuccess = function(event) {
+            const dados = event.target.result;
+            if (dados) {
+                document.getElementById('data_verificacao').value = dados.data_verificacao || "";
+                document.getElementById('identificacao_se').value = dados.identificacao_se || "";
+                document.getElementById('comentario_geral').value = dados.comentario_geral || "";
+                
+                arquivosMemoria = dados.fotos || {};
+                perguntas.forEach(p => {
+                    if(!arquivosMemoria[p.id]) arquivosMemoria[p.id] = [];
+                    renderizarMiniaturas(p.id);
+
+                    if (dados.respostas && dados.respostas[p.id]) {
+                        const r = dados.respostas[p.id];
+                        if (r.resposta) {
+                            const radio = document.querySelector(`input[name="resp_${p.id}"][value="${r.resposta}"]`);
+                            if (radio) radio.checked = true;
+                        }
+                        document.getElementById(`obs_${p.id}`).value = r.comentario || "";
+                    }
+                });
+            }
+        };
+    }
+
+    // ==========================================
+    // 5. O MOTOR DE EMPACOTAMENTO (JSZIP)
+    // ==========================================
+    async function gerarZipOffline() {
+        const sv = document.getElementById('busca_sv').value.trim();
+        if(!sv) {
+            alert("⚠️ Digite um SV para exportar.");
+            return;
+        }
+
+        const btn = document.getElementById('btnExportar');
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Empacotando arquivos...';
+        btn.disabled = true;
+
+        try {
+            // 1. Inicializa o JSZip
+            const zip = new JSZip();
+            const pastaFotos = zip.folder("Anexos_Fotograficos");
+
+            // 2. Coleta os dados em formato JSON (texto)
+            const respostasExport = [];
+            perguntas.forEach(p => {
+                const radio = document.querySelector(`input[name="resp_${p.id}"]:checked`);
+                respostasExport.push({
+                    "Etapa": p.texto,
+                    "Resultado": radio ? radio.value : "Não respondido",
+                    "Comentarios": document.getElementById(`obs_${p.id}`).value
+                });
+
+                // 3. Adiciona as fotos fisicamente dentro do ZIP
+                if(arquivosMemoria[p.id] && arquivosMemoria[p.id].length > 0) {
+                    arquivosMemoria[p.id].forEach((file, index) => {
+                        // Nomeia a foto de forma organizada: p1_foto_1.jpg
+                        const extensao = file.name.split('.').pop() || "jpg";
+                        const nomeArquivo = `${p.id}_foto_${index + 1}.${extensao}`;
+                        pastaFotos.file(nomeArquivo, file);
+                    });
+                }
+            });
+
+            // 4. Cria o Arquivo de Texto do Dossiê
+            const relatorioJson = {
+                "SV_Motor": sv,
+                "Data": document.getElementById('data_verificacao').value,
+                "Inspetor": document.getElementById('identificacao_se').value,
+                "Observacao_Geral": document.getElementById('comentario_geral').value,
+                "Checklist": respostasExport
+            };
+            zip.file(`Relatorio_Qualidade_${sv}.json`, JSON.stringify(relatorioJson, null, 4));
+
+            // 5. Gera e faz o download do arquivo .zip no tablet
+            const blobZip = await zip.generateAsync({ type: "blob" });
+            const linkDownload = document.createElement("a");
+            linkDownload.href = URL.createObjectURL(blobZip);
+            linkDownload.download = `Dossie_Offline_${sv}.zip`;
+            
+            document.body.appendChild(linkDownload);
+            linkDownload.click();
+            document.body.removeChild(linkDownload);
+
+            alert("✅ Arquivo ZIP salvo no seu tablet com sucesso!\n\nAgora você pode movê-lo manualmente para a nuvem da empresa (SharePoint/OneDrive).");
+
+            // Limpa o banco de dados do tablet para economizar memória do SV concluído
+            apagarRascunhoAoFinalizar(sv);
+
+        } catch (error) {
+            console.error(error);
+            alert("❌ Erro ao gerar arquivo ZIP. Tente novamente.");
+        }
+
+        btn.innerHTML = '<i class="fas fa-file-archive me-2"></i> FINALIZAR E BAIXAR ARQUIVO ZIP';
+        btn.disabled = false;
+    }
+
+    function apagarRascunhoAoFinalizar(sv) {
+        if (!db) return;
+        db.transaction(["rascunhos"], "readwrite").objectStore("rascunhos").delete(sv);
+        // Limpa a tela
+        setTimeout(() => { window.location.reload(); }, 2000);
+    }
+</script>
+</body>
+</html>
