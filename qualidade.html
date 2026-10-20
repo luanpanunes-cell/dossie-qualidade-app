@@ -7,8 +7,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
-    <!-- Biblioteca mágica que permite criar arquivos ZIP no tablet offline -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- Biblioteca mágica de PDF Offline -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
         body { background-color: #f3f2f1; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
@@ -31,7 +31,7 @@
     <div class="form-header shadow-sm mb-4 d-flex justify-content-between align-items-center">
         <div>
             <h2 class="fw-bold m-0"><i class="fas fa-tools me-2"></i> Inspeção Offline</h2>
-            <p class="m-0 mt-2 opacity-75">100% autônomo no tablet. Os dados geram um ZIP.</p>
+            <p class="m-0 mt-2 opacity-75">100% autônomo no tablet. Os dados geram um PDF de Alta Resolução.</p>
         </div>
         <div class="text-end">
             <span id="statusConexao" class="bg-success text-white"><i class="fas fa-wifi"></i> Online</span><br>
@@ -70,8 +70,8 @@
                 <textarea id="comentario_geral" class="form-control" rows="3" placeholder="Observações finais sobre o SV..."></textarea>
             </div>
 
-            <button type="button" id="btnExportar" class="btn btn-dark btn-lg w-100 fw-bold shadow mb-5 py-3" onclick="gerarZipOffline()">
-                <i class="fas fa-file-archive me-2"></i> FINALIZAR E BAIXAR ARQUIVO ZIP
+            <button type="button" id="btnExportar" class="btn btn-danger btn-lg w-100 fw-bold shadow mb-5 py-3" onclick="gerarPDFOffline()">
+                <i class="fas fa-file-pdf me-2"></i> FINALIZAR E BAIXAR RELATÓRIO PDF
             </button>
         </div>
     </form>
@@ -279,9 +279,9 @@
     }
 
     // ==========================================
-    // 5. O MOTOR DE EMPACOTAMENTO (JSZIP)
+    // 5. O MOTOR DE PDF OFFLINE (jsPDF) DE ALTA RESOLUÇÃO
     // ==========================================
-    async function gerarZipOffline() {
+    async function gerarPDFOffline() {
         const sv = document.getElementById('busca_sv').value.trim();
         if(!sv) {
             alert("⚠️ Digite um SV para exportar.");
@@ -289,73 +289,114 @@
         }
 
         const btn = document.getElementById('btnExportar');
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Empacotando arquivos...';
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Processando fotos em alta resolução...';
         btn.disabled = true;
 
         try {
-            // 1. Inicializa o JSZip
-            const zip = new JSZip();
-            const pastaFotos = zip.folder("Anexos_Fotograficos");
+            // Inicializa o gerador de PDF
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF('p', 'mm', 'a4'); 
 
-            // 2. Coleta os dados em formato JSON (texto)
-            const respostasExport = [];
+            // 1. Capa do Relatório
+            doc.setFontSize(16);
+            doc.setFont("helvetica", "bold");
+            doc.text(`DOSSIÊ DE QUALIDADE DPU - SV: ${sv}`, 10, 20);
+            
+            doc.setFontSize(11);
+            doc.setFont("helvetica", "normal");
+            doc.text(`Data da Inspeção: ${document.getElementById('data_verificacao').value}`, 10, 35);
+            doc.text(`Inspetor (Etiqueta SE): ${document.getElementById('identificacao_se').value}`, 10, 45);
+            
+            doc.setFont("helvetica", "bold");
+            doc.text(`Comentário Geral:`, 10, 60);
+            doc.setFont("helvetica", "normal");
+            const comentario = doc.splitTextToSize(document.getElementById('comentario_geral').value || "Sem observações.", 190);
+            doc.text(comentario, 10, 68);
+
+            // 2. Checklist (Tabela Simples)
+            let y = Math.max(90, 68 + (comentario.length * 6));
+            doc.setFont("helvetica", "bold");
+            doc.text(`Resumo do Checklist:`, 10, y);
+            y += 8;
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "normal");
+
             perguntas.forEach(p => {
                 const radio = document.querySelector(`input[name="resp_${p.id}"]:checked`);
-                respostasExport.push({
-                    "Etapa": p.texto,
-                    "Resultado": radio ? radio.value : "Não respondido",
-                    "Comentarios": document.getElementById(`obs_${p.id}`).value
-                });
-
-                // 3. Adiciona as fotos fisicamente dentro do ZIP
-                if(arquivosMemoria[p.id] && arquivosMemoria[p.id].length > 0) {
-                    arquivosMemoria[p.id].forEach((file, index) => {
-                        // Nomeia a foto de forma organizada: p1_foto_1.jpg
-                        const extensao = file.name.split('.').pop() || "jpg";
-                        const nomeArquivo = `${p.id}_foto_${index + 1}.${extensao}`;
-                        pastaFotos.file(nomeArquivo, file);
-                    });
-                }
+                const resp = radio ? radio.value : "Pendente";
+                const textoLimpo = p.texto.length > 80 ? p.texto.substring(0, 80) + "..." : p.texto;
+                doc.text(`[ ${resp} ] - ${textoLimpo}`, 10, y);
+                y += 6;
+                if(y > 280) { doc.addPage(); y = 20; }
             });
 
-            // 4. Cria o Arquivo de Texto do Dossiê
-            const relatorioJson = {
-                "SV_Motor": sv,
-                "Data": document.getElementById('data_verificacao').value,
-                "Inspetor": document.getElementById('identificacao_se').value,
-                "Observacao_Geral": document.getElementById('comentario_geral').value,
-                "Checklist": respostasExport
+            // Função para extrair as dimensões reais da foto
+            const processarImagem = (file) => {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const img = new Image();
+                        img.onload = () => resolve({ src: e.target.result, w: img.width, h: img.height });
+                        img.src = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                });
             };
-            zip.file(`Relatorio_Qualidade_${sv}.json`, JSON.stringify(relatorioJson, null, 4));
 
-            // 5. Gera e faz o download do arquivo .zip no tablet
-            const blobZip = await zip.generateAsync({ type: "blob" });
-            const linkDownload = document.createElement("a");
-            linkDownload.href = URL.createObjectURL(blobZip);
-            linkDownload.download = `Dossie_Offline_${sv}.zip`;
-            
-            document.body.appendChild(linkDownload);
-            linkDownload.click();
-            document.body.removeChild(linkDownload);
+            // 3. Anexos Fotográficos (Mantendo proporção intacta)
+            for (const p of perguntas) {
+                if (arquivosMemoria[p.id] && arquivosMemoria[p.id].length > 0) {
+                    for (const file of arquivosMemoria[p.id]) {
+                        // Cria uma página nova para cada foto
+                        doc.addPage();
+                        
+                        // Título Maiúsculo no topo esquerdo (igual ao seu exemplo visual)
+                        doc.setFontSize(10);
+                        doc.setFont("helvetica", "bold");
+                        const tituloMaiusculo = p.texto.toUpperCase();
+                        doc.text(tituloMaiusculo, 10, 15);
 
-            alert("✅ Arquivo ZIP salvo no seu tablet com sucesso!\n\nAgora você pode movê-lo manualmente para a nuvem da empresa (SharePoint/OneDrive).");
+                        // Carrega a foto crua em memória
+                        const imgDados = await processarImagem(file);
 
-            // Limpa o banco de dados do tablet para economizar memória do SV concluído
+                        // O Segredo da Proporção Perfeita (Não Corta e Não Estica)
+                        const pageWidth = doc.internal.pageSize.getWidth();
+                        const pageHeight = doc.internal.pageSize.getHeight();
+                        
+                        const maxImgWidth = pageWidth - 20; // 10mm de margem esquerda/direita
+                        const maxImgHeight = pageHeight - 30; // Margem para o título
+                        
+                        const ratio = Math.min(maxImgWidth / imgDados.w, maxImgHeight / imgDados.h);
+                        
+                        const finalWidth = imgDados.w * ratio;
+                        const finalHeight = imgDados.h * ratio;
+
+                        // Puxa a foto mantendo 100% da resolução base no espaço calculado
+                        doc.addImage(imgDados.src, 'JPEG', 10, 22, finalWidth, finalHeight);
+                    }
+                }
+            }
+
+            // 4. Salvar o PDF no aparelho
+            doc.save(`Relatorio_Qualidade_SV${sv}.pdf`);
+
+            alert("✅ Relatório PDF de Alta Resolução salvo no tablet com sucesso!\n\nAgora você pode enviá-lo manualmente para a nuvem da empresa.");
+
+            // Limpa o banco de dados local para liberar memória
             apagarRascunhoAoFinalizar(sv);
 
         } catch (error) {
             console.error(error);
-            alert("❌ Erro ao gerar arquivo ZIP. Tente novamente.");
+            alert("❌ Erro ao gerar o PDF. A memória do tablet pode estar cheia.");
         }
 
-        btn.innerHTML = '<i class="fas fa-file-archive me-2"></i> FINALIZAR E BAIXAR ARQUIVO ZIP';
+        btn.innerHTML = '<i class="fas fa-file-pdf me-2"></i> FINALIZAR E BAIXAR RELATÓRIO PDF';
         btn.disabled = false;
     }
 
     function apagarRascunhoAoFinalizar(sv) {
         if (!db) return;
         db.transaction(["rascunhos"], "readwrite").objectStore("rascunhos").delete(sv);
-        // Limpa a tela
         setTimeout(() => { window.location.reload(); }, 2000);
     }
 </script>
