@@ -123,14 +123,25 @@
     atualizarStatusRede();
 
     // ==========================================
-    // 2. CONSTRUÇÃO DO FORMULÁRIO (Exemplo Prático)
+    // 2. CONSTRUÇÃO DO FORMULÁRIO
     // ==========================================
     const perguntas = [
-        { id: "p1", texto: "Etiqueta de passagem do motor em banco" },
+        { id: "p1", texto: "Etiqueta de passagem do motor em banco fim de linha" },
         { id: "p2", texto: "Identificação metálica com SV do motor" },
         { id: "p3", texto: "Motor com Óleo?" },
-        { id: "p4", texto: "Verificar se não há peças faltantes" },
-        { id: "p5", texto: "As instrumentações estão coerentes?" }
+        { id: "p4", texto: "Verificar se não há peças faltantes da DT" },
+        { id: "p5", texto: "As instrumentações estão coerentes com a TIV? (Identificadas)" },
+        { id: "p6", texto: "Verificar anotação de torques presentes no dossier" },
+        { id: "p7", texto: "Relatório de metrologia presente no dossier?" },
+        { id: "p8", texto: "Verificar ausência de vazamentos" },
+        { id: "p9", texto: "Verificar correta vedação do motor (Tampões)" },
+        { id: "p10", texto: "Verificar se há degradação nos conectores" },
+        { id: "p11", texto: "Registro das faces do motor" },
+        { id: "p12", texto: "Registro do número de série do motor" },
+        { id: "p13", texto: "Peças de kit T11+T12 separados/montados conforme solicitado?" },
+        { id: "p14", texto: "Motor precisa estar com polia do encoder montada?" },
+        { id: "p15", texto: "Realizado algum realinhamento não previsto na DT?" },
+        { id: "p16", texto: "Dossier está com todo o preenchimento ok?" }
     ];
 
     const area = document.getElementById("areaPerguntas");
@@ -293,7 +304,6 @@
         btn.disabled = true;
 
         try {
-            // Inicializa o gerador de PDF
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF('p', 'mm', 'a4'); 
 
@@ -330,59 +340,65 @@
                 if(y > 280) { doc.addPage(); y = 20; }
             });
 
-            // Função para extrair as dimensões reais da foto
+            // --- NOVO: Função Canvas Anti-Distorção (Remove EXIF) ---
             const processarImagem = (file) => {
                 return new Promise((resolve) => {
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         const img = new Image();
-                        img.onload = () => resolve({ src: e.target.result, w: img.width, h: img.height });
+                        img.onload = () => {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, img.width, img.height);
+                            
+                            const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+                            resolve({ src: dataUrl, w: img.width, h: img.height });
+                        };
                         img.src = e.target.result;
                     };
                     reader.readAsDataURL(file);
                 });
             };
 
-            // 3. Anexos Fotográficos (Mantendo proporção intacta)
+            // 3. Anexos Fotográficos (Proporção Intacta e Centralizada)
             for (const p of perguntas) {
                 if (arquivosMemoria[p.id] && arquivosMemoria[p.id].length > 0) {
                     for (const file of arquivosMemoria[p.id]) {
-                        // Cria uma página nova para cada foto
                         doc.addPage();
                         
-                        // Título Maiúsculo no topo esquerdo (igual ao seu exemplo visual)
                         doc.setFontSize(10);
                         doc.setFont("helvetica", "bold");
                         const tituloMaiusculo = p.texto.toUpperCase();
                         doc.text(tituloMaiusculo, 10, 15);
 
-                        // Carrega a foto crua em memória
                         const imgDados = await processarImagem(file);
 
-                        // O Segredo da Proporção Perfeita (Não Corta e Não Estica)
                         const pageWidth = doc.internal.pageSize.getWidth();
                         const pageHeight = doc.internal.pageSize.getHeight();
                         
-                        const maxImgWidth = pageWidth - 20; // 10mm de margem esquerda/direita
-                        const maxImgHeight = pageHeight - 30; // Margem para o título
+                        const maxImgWidth = pageWidth - 20; 
+                        const maxImgHeight = pageHeight - 30; 
                         
                         const ratio = Math.min(maxImgWidth / imgDados.w, maxImgHeight / imgDados.h);
                         
                         const finalWidth = imgDados.w * ratio;
                         const finalHeight = imgDados.h * ratio;
 
-                        // Puxa a foto mantendo 100% da resolução base no espaço calculado
-                        doc.addImage(imgDados.src, 'JPEG', 10, 22, finalWidth, finalHeight);
+                        // Centraliza a foto horizontalmente no meio da página
+                        const eixoX = (pageWidth - finalWidth) / 2;
+
+                        doc.addImage(imgDados.src, 'JPEG', eixoX, 22, finalWidth, finalHeight);
                     }
                 }
             }
 
-            // 4. Salvar o PDF no aparelho
-            doc.save(`Relatorio_Qualidade_SV${sv}.pdf`);
+            // 4. Salvar o PDF na pasta de Downloads do aparelho
+            const nomeArquivoFinal = `DOSSIE_QUALIDADE_SV_${sv}.pdf`;
+            doc.save(nomeArquivoFinal);
 
-            alert("✅ Relatório PDF de Alta Resolução salvo no tablet com sucesso!\n\nAgora você pode enviá-lo manualmente para a nuvem da empresa.");
-
-            // Limpa o banco de dados local para liberar memória
+            alert(`✅ Relatório PDF salvo no tablet com sucesso!\n\nEle foi enviado para a sua pasta de Downloads com o nome: ${nomeArquivoFinal}`);
             apagarRascunhoAoFinalizar(sv);
 
         } catch (error) {
