@@ -48,7 +48,11 @@
                 <input type="text" id="busca_sv" class="form-control" placeholder="Digite o SV (Ex: 8052)" required>
                 <button type="button" class="btn btn-primary fw-bold" onclick="iniciarInspecao()">Iniciar / Retomar</button>
             </div>
-            <div id="info_motor" class="alert d-none mb-0 py-2"></div>
+            
+            <!-- ÁREA DOS RASCUNHOS EM ANDAMENTO -->
+            <div id="listaRascunhos" class="d-flex flex-wrap gap-2 mt-3"></div>
+
+            <div id="info_motor" class="alert d-none mb-0 py-2 mt-3"></div>
             <input type="hidden" id="motor_id" value="OFFLINE_MODE" required>
         </div>
 
@@ -112,7 +116,10 @@
             db.createObjectStore("historico_pdfs", { keyPath: "sv" });
         }
     };
-    requestDB.onsuccess = function(event) { db = event.target.result; };
+    requestDB.onsuccess = function(event) { 
+        db = event.target.result; 
+        atualizarListaRascunhos(); // Carrega os dossiês em andamento ao abrir a página
+    };
 
     function atualizarStatusRede() {
         const badge = document.getElementById('statusConexao');
@@ -182,15 +189,61 @@
     document.getElementById('data_verificacao').valueAsDate = new Date();
 
     // ==========================================
+    // NOVO: PAINEL DE DRAFT (EM ANDAMENTO)
+    // ==========================================
+    function atualizarListaRascunhos() {
+        if (!db) return;
+        const request = db.transaction(["rascunhos"], "readonly").objectStore("rascunhos").getAll();
+        request.onsuccess = function(event) {
+            const rascunhos = event.target.result;
+            const container = document.getElementById('listaRascunhos');
+            container.innerHTML = "";
+            
+            if(rascunhos.length > 0) {
+                container.innerHTML = `<span class="text-muted small fw-bold w-100 d-block mb-1"><i class="fas fa-clock text-warning"></i> Inspeções em Andamento (Pausadas):</span>`;
+                rascunhos.forEach(r => {
+                    container.innerHTML += `
+                        <button type="button" class="btn btn-warning btn-sm fw-bold shadow-sm text-dark" onclick="retomarRascunho('${r.sv}')">
+                            SV: ${r.sv}
+                        </button>
+                    `;
+                });
+            }
+        };
+    }
+
+    function retomarRascunho(sv) {
+        document.getElementById('busca_sv').value = sv;
+        iniciarInspecao();
+    }
+
+    // ==========================================
     // 3. INICIAR INSPEÇÃO
     // ==========================================
     function iniciarInspecao() {
         const sv = document.getElementById('busca_sv').value.trim();
         if(!sv) return;
+
+        // LIMPEZA ABSOLUTA DE SEGURANÇA (Para evitar mistura de motores)
+        document.getElementById('identificacao_se').value = "";
+        document.getElementById('comentario_geral').value = "";
+        document.getElementById('data_verificacao').valueAsDate = new Date();
+        perguntas.forEach(p => {
+            arquivosMemoria[p.id] = [];
+            renderizarMiniaturas(p.id);
+            const radio = document.querySelector(`input[name="resp_${p.id}"]:checked`);
+            if(radio) radio.checked = false;
+            document.getElementById(`obs_${p.id}`).value = "";
+        });
+
         const info = document.getElementById('info_motor');
-        info.innerHTML = `✅ Criando dossiê local para o SV: <b>${sv}</b>.`;
-        info.className = 'alert alert-info mb-0 py-2';
+        info.innerHTML = `✅ Dossiê local ativo: <b>${sv}</b>. Suas fotos e textos serão salvos automaticamente.`;
+        info.className = 'alert alert-info mb-0 py-2 mt-3';
+        info.classList.remove('d-none');
+
         document.getElementById('areaFormulario').classList.remove('d-none');
+        
+        // Puxa o rascunho se ele existir
         carregarRascunho(sv);
     }
 
@@ -263,6 +316,9 @@
 
         const store = db.transaction(["rascunhos"], "readwrite").objectStore("rascunhos");
         store.put(dadosParaSalvar);
+        
+        // Atualiza a lista de pendentes em tempo real de forma silenciosa
+        atualizarListaRascunhos();
     }
 
     function carregarRascunho(sv) {
