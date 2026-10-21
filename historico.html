@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Histórico de Dossiês - Offline</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f3f2f1; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .header-hist { background-color: #212529; color: white; padding: 20px; border-radius: 8px 8px 0 0; }
+        .card-custom { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    </style>
+</head>
+<body class="p-4">
+
+<div class="container" style="max-width: 900px;">
+    <div class="header-hist shadow-sm mb-4 d-flex justify-content-between align-items-center">
+        <div>
+            <h3 class="fw-bold m-0"><i class="fas fa-archive me-2"></i> Histórico de Dossiês (Qualidade)</h3>
+            <p class="m-0 mt-1 opacity-75">Baixe novamente os relatórios gerados neste tablet.</p>
+        </div>
+        <a href="qualidade.html" class="btn btn-outline-light btn-sm fw-bold"><i class="fas fa-plus"></i> Nova Inspeção</a>
+    </div>
+
+    <div class="card-custom mb-4">
+        <div class="input-group input-group-lg shadow-sm">
+            <span class="input-group-text bg-white"><i class="fas fa-search text-primary"></i></span>
+            <input type="text" id="buscaHistorico" class="form-control border-start-0" placeholder="Pesquisar por SV, Data ou Inspetor..." onkeyup="filtrarHistorico()">
+        </div>
+    </div>
+
+    <div class="card-custom">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>SV Motor</th>
+                        <th>Data Verificação</th>
+                        <th>Inspetor</th>
+                        <th>Gerado em</th>
+                        <th class="text-end">Ação</th>
+                    </tr>
+                </thead>
+                <tbody id="tabelaHistorico">
+                    <tr><td colspan="5" class="text-center text-muted py-4">Carregando histórico do tablet...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    let db;
+    let todosDossies = [];
+    const requestDB = indexedDB.open("QualidadeDB", 1);
+
+    requestDB.onsuccess = function(event) {
+        db = event.target.result;
+        carregarHistorico();
+    };
+
+    requestDB.onerror = function(event) {
+        alert("Erro ao acessar o banco de dados do tablet.");
+    };
+
+    function carregarHistorico() {
+        if (!db.objectStoreNames.contains("historico_pdfs")) {
+            document.getElementById('tabelaHistorico').innerHTML = `<tr><td colspan="5" class="text-center text-muted py-4">Nenhum dossiê foi finalizado ainda.</td></tr>`;
+            return;
+        }
+
+        const transaction = db.transaction(["historico_pdfs"], "readonly");
+        const store = transaction.objectStore("historico_pdfs");
+        const request = store.getAll();
+
+        request.onsuccess = function(event) {
+            todosDossies = event.target.result;
+            
+            // Ordenar do mais recente para o mais antigo
+            todosDossies.sort((a, b) => {
+                // Tenta extrair a data de criação, se não tiver, mantém a ordem do banco
+                if(a.data_criacao && b.data_criacao) {
+                    return b.data_criacao.localeCompare(a.data_criacao);
+                }
+                return 0;
+            });
+
+            renderizarTabela(todosDossies);
+        };
+    }
+
+    function renderizarTabela(lista) {
+        const tbody = document.getElementById('tabelaHistorico');
+        tbody.innerHTML = "";
+
+        if (lista.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-4 fw-bold"><i class="fas fa-folder-open fs-3 d-block mb-2 text-secondary"></i>Nenhum dossiê encontrado.</td></tr>`;
+            return;
+        }
+
+        lista.forEach(dossie => {
+            tbody.innerHTML += `
+                <tr>
+                    <td class="fw-bold text-primary fs-5">${dossie.sv}</td>
+                    <td class="fw-bold">${dossie.data_verificacao || "N/A"}</td>
+                    <td>${dossie.inspetor || "N/A"}</td>
+                    <td class="text-muted small">${dossie.data_criacao || "N/A"}</td>
+                    <td class="text-end">
+                        <button class="btn btn-danger btn-sm fw-bold shadow-sm" onclick="baixarPDF('${dossie.sv}')">
+                            <i class="fas fa-file-pdf me-1"></i> Baixar PDF
+                        </button>
+                    </td>
+                </tr>
+            `;
+        });
+    }
+
+    function filtrarHistorico() {
+        const termo = document.getElementById('buscaHistorico').value.toLowerCase();
+        const listaFiltrada = todosDossies.filter(d => {
+            return (d.sv && d.sv.toLowerCase().includes(termo)) ||
+                   (d.data_verificacao && d.data_verificacao.toLowerCase().includes(termo)) ||
+                   (d.inspetor && d.inspetor.toLowerCase().includes(termo));
+        });
+        renderizarTabela(listaFiltrada);
+    }
+
+    function baixarPDF(sv) {
+        const transaction = db.transaction(["historico_pdfs"], "readonly");
+        const store = transaction.objectStore("historico_pdfs");
+        const request = store.get(sv);
+
+        request.onsuccess = function(event) {
+            const dossie = event.target.result;
+            if (dossie && dossie.arquivo_pdf) {
+                // Cria um link temporário com o Blob salvo no banco e força o download
+                const urlBlob = URL.createObjectURL(dossie.arquivo_pdf);
+                const link = document.createElement('a');
+                link.href = urlBlob;
+                link.download = `DOSSIE_QUALIDADE_SV_${sv}.pdf`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(urlBlob); // Libera memória
+            } else {
+                alert("❌ Erro: O arquivo PDF não foi encontrado no banco de dados.");
+            }
+        };
+    }
+</script>
+</body>
+</html>
