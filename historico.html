@@ -18,7 +18,7 @@
     <div class="header-hist shadow-sm mb-4 d-flex justify-content-between align-items-center">
         <div>
             <h3 class="fw-bold m-0"><i class="fas fa-archive me-2"></i> Histórico de Dossiês (Qualidade)</h3>
-            <p class="m-0 mt-1 opacity-75">Baixe novamente os relatórios gerados neste tablet.</p>
+            <p class="m-0 mt-1 opacity-75">Baixe ou compartilhe os relatórios gerados neste tablet.</p>
         </div>
         <a href="qualidade.html" class="btn btn-outline-light btn-sm fw-bold"><i class="fas fa-plus"></i> Nova Inspeção</a>
     </div>
@@ -39,7 +39,7 @@
                         <th>Data Verificação</th>
                         <th>Inspetor</th>
                         <th>Gerado em</th>
-                        <th class="text-end">Ação</th>
+                        <th class="text-end">Ações</th>
                     </tr>
                 </thead>
                 <tbody id="tabelaHistorico">
@@ -79,7 +79,6 @@
             
             // Ordenar do mais recente para o mais antigo
             todosDossies.sort((a, b) => {
-                // Tenta extrair a data de criação, se não tiver, mantém a ordem do banco
                 if(a.data_criacao && b.data_criacao) {
                     return b.data_criacao.localeCompare(a.data_criacao);
                 }
@@ -107,8 +106,11 @@
                     <td>${dossie.inspetor || "N/A"}</td>
                     <td class="text-muted small">${dossie.data_criacao || "N/A"}</td>
                     <td class="text-end">
-                        <button class="btn btn-danger btn-sm fw-bold shadow-sm" onclick="baixarPDF('${dossie.sv}')">
-                            <i class="fas fa-file-pdf me-1"></i> Baixar PDF
+                        <button class="btn btn-primary btn-sm fw-bold shadow-sm me-1" onclick="compartilharPDF('${dossie.sv}')" title="Enviar para OneDrive">
+                            <i class="fas fa-share-nodes"></i>
+                        </button>
+                        <button class="btn btn-danger btn-sm fw-bold shadow-sm" onclick="baixarPDF('${dossie.sv}')" title="Baixar">
+                            <i class="fas fa-file-pdf"></i>
                         </button>
                     </td>
                 </tr>
@@ -134,7 +136,6 @@
         request.onsuccess = function(event) {
             const dossie = event.target.result;
             if (dossie && dossie.arquivo_pdf) {
-                // Cria um link temporário com o Blob salvo no banco e força o download
                 const urlBlob = URL.createObjectURL(dossie.arquivo_pdf);
                 const link = document.createElement('a');
                 link.href = urlBlob;
@@ -142,7 +143,38 @@
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
-                URL.revokeObjectURL(urlBlob); // Libera memória
+                URL.revokeObjectURL(urlBlob); 
+            } else {
+                alert("❌ Erro: O arquivo PDF não foi encontrado no banco de dados.");
+            }
+        };
+    }
+
+    // NOVA FUNÇÃO: COMPARTILHAR DIRETO DO HISTÓRICO
+    async function compartilharPDF(sv) {
+        const transaction = db.transaction(["historico_pdfs"], "readonly");
+        const store = transaction.objectStore("historico_pdfs");
+        const request = store.get(sv);
+
+        request.onsuccess = async function(event) {
+            const dossie = event.target.result;
+            if (dossie && dossie.arquivo_pdf) {
+                const nomeArquivoFinal = `DOSSIE_QUALIDADE_SV_${sv}.pdf`;
+                const arquivoFisico = new File([dossie.arquivo_pdf], nomeArquivoFinal, { type: 'application/pdf' });
+
+                if (navigator.canShare && navigator.canShare({ files: [arquivoFisico] })) {
+                    try {
+                        await navigator.share({
+                            files: [arquivoFisico],
+                            title: 'Dossiê de Qualidade',
+                            text: `Dossiê Finalizado - SV: ${sv}`
+                        });
+                    } catch (error) {
+                        console.log("Compartilhamento cancelado", error);
+                    }
+                } else {
+                    alert("⚠️ O seu tablet não suporta compartilhar arquivos grandes desta forma. Utilize o botão vermelho para Baixar.");
+                }
             } else {
                 alert("❌ Erro: O arquivo PDF não foi encontrado no banco de dados.");
             }
