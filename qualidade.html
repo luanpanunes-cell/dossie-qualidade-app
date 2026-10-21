@@ -34,7 +34,11 @@
             <p class="m-0 mt-2 opacity-75">100% autônomo no tablet. Os dados geram um PDF de Alta Resolução.</p>
         </div>
         <div class="text-end">
-            <span id="statusConexao" class="bg-success text-white"><i class="fas fa-wifi"></i> Online</span><br>
+            <span id="statusConexao" class="bg-success text-white d-inline-block mb-2"><i class="fas fa-wifi"></i> Online</span><br>
+            <!-- NOVO BOTÃO DE HISTÓRICO -->
+            <a href="historico.html" class="btn btn-outline-light btn-sm fw-bold shadow-sm">
+                <i class="fas fa-history me-1"></i> Acessar Histórico
+            </a>
         </div>
     </div>
 
@@ -102,23 +106,22 @@
 
     requestDB.onupgradeneeded = function(event) {
         db = event.target.result;
-        // Tabela antiga para os rascunhos em andamento
         if (!db.objectStoreNames.contains("rascunhos")) {
             db.createObjectStore("rascunhos", { keyPath: "sv" });
         }
-        // NOVA TABELA: Cofre para guardar os PDFs finalizados
         if (!db.objectStoreNames.contains("historico_pdfs")) {
             db.createObjectStore("historico_pdfs", { keyPath: "sv" });
         }
     };
+    requestDB.onsuccess = function(event) { db = event.target.result; };
 
     function atualizarStatusRede() {
         const badge = document.getElementById('statusConexao');
         if (navigator.onLine) {
-            badge.className = "bg-success text-white";
+            badge.className = "bg-success text-white d-inline-block mb-2";
             badge.innerHTML = '<i class="fas fa-wifi"></i> Online';
         } else {
-            badge.className = "bg-danger text-white";
+            badge.className = "bg-danger text-white d-inline-block mb-2";
             badge.innerHTML = '<i class="fas fa-plane"></i> Desconectado (Modo Nativo)';
         }
     }
@@ -127,7 +130,7 @@
     atualizarStatusRede();
 
     // ==========================================
-    // 2. CONSTRUÇÃO DO FORMULÁRIO
+    // 2. CONSTRUÇÃO DO FORMULÁRIO (Perguntas Oficiais)
     // ==========================================
     const perguntas = [
         { id: "p1", texto: "Etiqueta de passagem do motor em banco fim de linha" },
@@ -344,7 +347,7 @@
                 if(y > 280) { doc.addPage(); y = 20; }
             });
 
-            // --- NOVO: Função Canvas Anti-Distorção (Remove EXIF) ---
+            // Função Canvas Anti-Distorção (Remove EXIF)
             const processarImagem = (file) => {
                 return new Promise((resolve) => {
                     const reader = new FileReader();
@@ -390,7 +393,7 @@
                         const finalWidth = imgDados.w * ratio;
                         const finalHeight = imgDados.h * ratio;
 
-                        // Centraliza a foto horizontalmente no meio da página
+                        // Centraliza a foto horizontalmente
                         const eixoX = (pageWidth - finalWidth) / 2;
 
                         doc.addImage(imgDados.src, 'JPEG', eixoX, 22, finalWidth, finalHeight);
@@ -402,13 +405,8 @@
             const nomeArquivoFinal = `DOSSIE_QUALIDADE_SV_${sv}.pdf`;
             doc.save(nomeArquivoFinal);
 
-
-            // 4. Salvar o PDF na pasta de Downloads do aparelho
-            const nomeArquivoFinal = `DOSSIE_QUALIDADE_SV_${sv}.pdf`;
-            doc.save(nomeArquivoFinal);
-
-            // --- NOVO: SALVAR CÓPIA DO PDF NO HISTÓRICO OFFLINE ---
-            const pdfBlob = doc.output('blob'); // Transforma o PDF num pacote de dados
+            // --- SALVAR CÓPIA DO PDF NO HISTÓRICO OFFLINE ---
+            const pdfBlob = doc.output('blob');
             const registroHistorico = {
                 sv: sv,
                 data_verificacao: document.getElementById('data_verificacao').value,
@@ -417,11 +415,7 @@
                 data_criacao: new Date().toLocaleString('pt-BR')
             };
             db.transaction(["historico_pdfs"], "readwrite").objectStore("historico_pdfs").put(registroHistorico);
-            // ------------------------------------------------------
-
-            alert(`✅ Relatório PDF salvo no tablet com sucesso!\n\nEle foi enviado para a sua pasta de Downloads com o nome: ${nomeArquivoFinal}`);
-            apagarRascunhoAoFinalizar(sv);
-            
+            // ------------------------------------------------
 
             alert(`✅ Relatório PDF salvo no tablet com sucesso!\n\nEle foi enviado para a sua pasta de Downloads com o nome: ${nomeArquivoFinal}`);
             apagarRascunhoAoFinalizar(sv);
