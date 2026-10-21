@@ -102,11 +102,15 @@
 
     requestDB.onupgradeneeded = function(event) {
         db = event.target.result;
+        // Tabela antiga para os rascunhos em andamento
         if (!db.objectStoreNames.contains("rascunhos")) {
             db.createObjectStore("rascunhos", { keyPath: "sv" });
         }
+        // NOVA TABELA: Cofre para guardar os PDFs finalizados
+        if (!db.objectStoreNames.contains("historico_pdfs")) {
+            db.createObjectStore("historico_pdfs", { keyPath: "sv" });
+        }
     };
-    requestDB.onsuccess = function(event) { db = event.target.result; };
 
     function atualizarStatusRede() {
         const badge = document.getElementById('statusConexao');
@@ -397,6 +401,27 @@
             // 4. Salvar o PDF na pasta de Downloads do aparelho
             const nomeArquivoFinal = `DOSSIE_QUALIDADE_SV_${sv}.pdf`;
             doc.save(nomeArquivoFinal);
+
+
+            // 4. Salvar o PDF na pasta de Downloads do aparelho
+            const nomeArquivoFinal = `DOSSIE_QUALIDADE_SV_${sv}.pdf`;
+            doc.save(nomeArquivoFinal);
+
+            // --- NOVO: SALVAR CÓPIA DO PDF NO HISTÓRICO OFFLINE ---
+            const pdfBlob = doc.output('blob'); // Transforma o PDF num pacote de dados
+            const registroHistorico = {
+                sv: sv,
+                data_verificacao: document.getElementById('data_verificacao').value,
+                inspetor: document.getElementById('identificacao_se').value,
+                arquivo_pdf: pdfBlob,
+                data_criacao: new Date().toLocaleString('pt-BR')
+            };
+            db.transaction(["historico_pdfs"], "readwrite").objectStore("historico_pdfs").put(registroHistorico);
+            // ------------------------------------------------------
+
+            alert(`✅ Relatório PDF salvo no tablet com sucesso!\n\nEle foi enviado para a sua pasta de Downloads com o nome: ${nomeArquivoFinal}`);
+            apagarRascunhoAoFinalizar(sv);
+            
 
             alert(`✅ Relatório PDF salvo no tablet com sucesso!\n\nEle foi enviado para a sua pasta de Downloads com o nome: ${nomeArquivoFinal}`);
             apagarRascunhoAoFinalizar(sv);
