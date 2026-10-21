@@ -75,7 +75,7 @@
             </div>
 
             <button type="button" id="btnExportar" class="btn btn-danger btn-lg w-100 fw-bold shadow mb-5 py-3" onclick="gerarPDFOffline()">
-                <i class="fas fa-file-pdf me-2"></i> FINALIZAR E BAIXAR RELATÓRIO PDF
+                <i class="fas fa-file-pdf me-2"></i> FINALIZAR E COMPARTILHAR PDF
             </button>
         </div>
     </form>
@@ -297,7 +297,7 @@
     }
 
     // ==========================================
-    // 5. O MOTOR DE PDF OFFLINE (jsPDF) DE ALTA RESOLUÇÃO
+    // 5. O MOTOR DE PDF OFFLINE COM PARTILHA NATIVA (OneDrive)
     // ==========================================
     async function gerarPDFOffline() {
         const sv = document.getElementById('busca_sv').value.trim();
@@ -401,11 +401,10 @@
                 }
             }
 
-            // 4. Invocar Partilha Nativa do Tablet (OneDrive / Email / etc)
+            // 4. Salvar PDF no Histórico Offline Interno
             const nomeArquivoFinal = `DOSSIE_QUALIDADE_SV_${sv}.pdf`;
             const pdfBlob = doc.output('blob');
             
-            // --- SALVAR CÓPIA DO PDF NO HISTÓRICO OFFLINE (Mantém-se igual) ---
             const registroHistorico = {
                 sv: sv,
                 data_verificacao: document.getElementById('data_verificacao').value,
@@ -414,12 +413,10 @@
                 data_criacao: new Date().toLocaleString('pt-BR')
             };
             db.transaction(["historico_pdfs"], "readwrite").objectStore("historico_pdfs").put(registroHistorico);
-            // ------------------------------------------------
 
-            // Prepara o ficheiro para o sistema Android/iOS
+            // 5. Acionar o Botão de Partilha Nativo (Mágica para o OneDrive!)
             const arquivoFisico = new File([pdfBlob], nomeArquivoFinal, { type: 'application/pdf' });
 
-            // Verifica se o tablet suporta a janela de partilha
             if (navigator.canShare && navigator.canShare({ files: [arquivoFisico] })) {
                 try {
                     await navigator.share({
@@ -427,21 +424,36 @@
                         title: 'Dossiê de Qualidade',
                         text: `Dossiê Finalizado - SV: ${sv}`
                     });
-                    // Se o utilizador partilhar com sucesso:
+                    // Feito com sucesso, limpamos a memória do tablet
                     apagarRascunhoAoFinalizar(sv);
                 } catch (error) {
-                    console.log("O utilizador fechou a janela de partilha.", error);
-                    // Se ele cancelar a partilha, forçamos o download normal por segurança
+                    // O utilizador cancelou ou clicou fora, forçamos o download normal
+                    console.log("Compartilhamento cancelado ou falhou.", error);
                     doc.save(nomeArquivoFinal);
                     alert(`✅ Guardado em Downloads: ${nomeArquivoFinal}`);
                     apagarRascunhoAoFinalizar(sv);
                 }
             } else {
-                // FALLBACK: Se estiver num PC ou navegador antigo que não tem botão de partilhar
+                // Caso não suporte Share (ex: PC antigo), forçamos o download
                 doc.save(nomeArquivoFinal);
                 alert(`✅ Guardado em Downloads: ${nomeArquivoFinal}\n\nEnvie manualmente para o OneDrive.`);
                 apagarRascunhoAoFinalizar(sv);
             }
+
+        } catch (error) {
+            console.error(error);
+            alert("❌ Erro ao gerar o PDF. A memória do tablet pode estar cheia.");
+        }
+
+        btn.innerHTML = '<i class="fas fa-file-pdf me-2"></i> FINALIZAR E COMPARTILHAR PDF';
+        btn.disabled = false;
+    }
+
+    function apagarRascunhoAoFinalizar(sv) {
+        if (!db) return;
+        db.transaction(["rascunhos"], "readwrite").objectStore("rascunhos").delete(sv);
+        setTimeout(() => { window.location.reload(); }, 2000);
+    }
 </script>
 </body>
 </html>
