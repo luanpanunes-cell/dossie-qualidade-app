@@ -350,7 +350,7 @@
     }
 
     // ==========================================
-    // 5. O MOTOR DE PDF OFFLINE COM PARTILHA NATIVA (OneDrive)
+    // 5. O MOTOR DE PDF OFFLINE (jsPDF) DE ALTA RESOLUÇÃO
     // ==========================================
     async function gerarPDFOffline() {
         const sv = document.getElementById('busca_sv').value.trim();
@@ -360,7 +360,7 @@
         }
 
         const btn = document.getElementById('btnExportar');
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Processando fotos em alta resolução...';
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Processando fotos... (Isto pode levar alguns segundos)';
         btn.disabled = true;
 
         try {
@@ -383,7 +383,7 @@
             const comentario = doc.splitTextToSize(document.getElementById('comentario_geral').value || "Sem observações.", 190);
             doc.text(comentario, 10, 68);
 
-            // 2. Checklist
+            // 2. Checklist (Tabela Simples)
             let y = Math.max(90, 68 + (comentario.length * 6));
             doc.setFont("helvetica", "bold");
             doc.text(`Resumo do Checklist:`, 10, y);
@@ -400,44 +400,49 @@
                 if(y > 280) { doc.addPage(); y = 20; }
             });
 
-            // Função Canvas Inteligente (Comprime e Remove EXIF)
+            // --- Função Canvas Inteligente Blindada ---
             const processarImagem = (file) => {
-                return new Promise((resolve) => {
+                return new Promise((resolve, reject) => {
+                    if (!file) return reject(new Error("Arquivo inexistente."));
+
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         const img = new Image();
                         img.onload = () => {
-                            const canvas = document.createElement('canvas');
-                            
-                            // Compressor: 1200px (Suficiente para folha A4 leve)
-                            const MAX_WIDTH = 1200;
-                            const MAX_HEIGHT = 1200;
-                            let width = img.width;
-                            let height = img.height;
+                            try {
+                                const canvas = document.createElement('canvas');
+                                const MAX_WIDTH = 1200;
+                                const MAX_HEIGHT = 1200;
+                                let width = img.width;
+                                let height = img.height;
 
-                            if (width > height) {
-                                if (width > MAX_WIDTH) {
-                                    height = Math.round(height * (MAX_WIDTH / width));
-                                    width = MAX_WIDTH;
+                                if (width > height) {
+                                    if (width > MAX_WIDTH) { height = Math.round(height * (MAX_WIDTH / width)); width = MAX_WIDTH; }
+                                } else {
+                                    if (height > MAX_HEIGHT) { width = Math.round(width * (MAX_HEIGHT / height)); height = MAX_HEIGHT; }
                                 }
-                            } else {
-                                if (height > MAX_HEIGHT) {
-                                    width = Math.round(width * (MAX_HEIGHT / height));
-                                    height = MAX_HEIGHT;
-                                }
+
+                                canvas.width = width;
+                                canvas.height = height;
+                                const ctx = canvas.getContext('2d');
+                                ctx.drawImage(img, 0, 0, width, height);
+                                
+                                const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+                                
+                                // Limpeza forçada de memória RAM para evitar crash com muitas fotos
+                                canvas.width = 0;
+                                canvas.height = 0;
+                                img.src = "";
+                                
+                                resolve({ src: dataUrl, w: width, h: height });
+                            } catch (err) {
+                                reject(new Error("Falha ao comprimir a imagem no Canvas."));
                             }
-
-                            canvas.width = width;
-                            canvas.height = height;
-                            const ctx = canvas.getContext('2d');
-                            ctx.drawImage(img, 0, 0, width, height);
-                            
-                            // Qualidade a 65% para habilitar Partilha Nativa do iOS/Android
-                            const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
-                            resolve({ src: dataUrl, w: width, h: height });
                         };
+                        img.onerror = () => reject(new Error(`O arquivo '${file.name}' não é uma imagem válida.`));
                         img.src = e.target.result;
                     };
+                    reader.onerror = () => reject(new Error("Falha de leitura no disco/memória do tablet."));
                     reader.readAsDataURL(file);
                 });
             };
@@ -453,6 +458,7 @@
                         const tituloMaiusculo = p.texto.toUpperCase();
                         doc.text(tituloMaiusculo, 10, 15);
 
+                        // Se a imagem falhar, a promessa atira um erro e nós apanhamos no catch
                         const imgDados = await processarImagem(file);
 
                         const pageWidth = doc.internal.pageSize.getWidth();
@@ -473,7 +479,7 @@
                 }
             }
 
-            // 4. Salvar PDF no Histórico
+            // 4. Salvar PDF no Histórico Offline Interno
             const nomeArquivoFinal = `DOSSIE_QUALIDADE_SV_${sv}.pdf`;
             const pdfBlob = doc.output('blob');
             
@@ -486,7 +492,7 @@
             };
             db.transaction(["historico_pdfs"], "readwrite").objectStore("historico_pdfs").put(registroHistorico);
 
-            // 5. Acionar Partilha Nativa (OneDrive)
+            // 5. Acionar o Botão de Partilha Nativo
             const arquivoFisico = new File([pdfBlob], nomeArquivoFinal, { type: 'application/pdf' });
 
             if (navigator.canShare && navigator.canShare({ files: [arquivoFisico] })) {
@@ -511,18 +517,14 @@
 
         } catch (error) {
             console.error(error);
-            alert("❌ Erro ao gerar o PDF. A memória do tablet pode estar cheia.");
+            // AGORA VAMOS VER O VERDADEIRO MOTIVO DO ERRO
+            alert(`❌ Falha no Processamento:\n\n${error.message}\n\nVerifique se todas as fotos anexadas são válidas.`);
         }
 
         btn.innerHTML = '<i class="fas fa-file-pdf me-2"></i> FINALIZAR E COMPARTILHAR PDF';
         btn.disabled = false;
     }
 
-    function apagarRascunhoAoFinalizar(sv) {
-        if (!db) return;
-        db.transaction(["rascunhos"], "readwrite").objectStore("rascunhos").delete(sv);
-        setTimeout(() => { window.location.reload(); }, 2000);
-    }
 </script>
 </body>
 </html>
