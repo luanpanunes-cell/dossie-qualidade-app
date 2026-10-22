@@ -105,7 +105,7 @@
     // ==========================================
     let db;
     let arquivosMemoria = {};
-    const requestDB = indexedDB.open("QualidadeDB", 1);
+    const requestDB = indexedDB.open("QualidadeDB", 2);
 
     requestDB.onupgradeneeded = function(event) {
         db = event.target.result;
