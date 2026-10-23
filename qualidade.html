@@ -7,7 +7,6 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     
-    <!-- Biblioteca mágica de PDF Offline -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <style>
@@ -49,7 +48,6 @@
                 <button type="button" class="btn btn-primary fw-bold" onclick="iniciarInspecao()">Iniciar / Retomar</button>
             </div>
             
-            <!-- ÁREA DOS RASCUNHOS EM ANDAMENTO -->
             <div id="listaRascunhos" class="d-flex flex-wrap gap-2 mt-3"></div>
 
             <div id="info_motor" class="alert d-none mb-0 py-2 mt-3"></div>
@@ -77,9 +75,14 @@
                 <textarea id="comentario_geral" class="form-control" rows="3" placeholder="Observações finais sobre o SV..."></textarea>
             </div>
 
-            <button type="button" id="btnExportar" class="btn btn-danger btn-lg w-100 fw-bold shadow mb-5 py-3" onclick="gerarPDFOffline()">
-                <i class="fas fa-file-pdf me-2"></i> FINALIZAR E COMPARTILHAR PDF
-            </button>
+            <div class="d-flex gap-2 mb-5">
+                <button type="button" class="btn btn-warning btn-lg fw-bold shadow w-50" onclick="pausarInspecao()">
+                    <i class="fas fa-pause me-2"></i> PAUSAR INSPEÇÃO
+                </button>
+                <button type="button" id="btnExportar" class="btn btn-danger btn-lg fw-bold shadow w-50" onclick="gerarPDFOffline()">
+                    <i class="fas fa-check-double me-2"></i> FINALIZAR E COMPARTILHAR
+                </button>
+            </div>
         </div>
     </form>
 </div>
@@ -100,11 +103,10 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    // ==========================================
-    // 1. BANCO DE DADOS OFFLINE (IndexedDB)
-    // ==========================================
     let db;
     let arquivosMemoria = {};
+    let finalizando = false; 
+
     const requestDB = indexedDB.open("QualidadeDB", 2);
 
     requestDB.onupgradeneeded = function(event) {
@@ -118,7 +120,7 @@
     };
     requestDB.onsuccess = function(event) { 
         db = event.target.result; 
-        atualizarListaRascunhos(); // Carrega os dossiês em andamento ao abrir a página
+        atualizarListaRascunhos(); 
     };
 
     function atualizarStatusRede() {
@@ -135,9 +137,6 @@
     window.addEventListener('offline', atualizarStatusRede);
     atualizarStatusRede();
 
-    // ==========================================
-    // 2. CONSTRUÇÃO DO FORMULÁRIO
-    // ==========================================
     const perguntas = [
         { id: "p1", texto: "Etiqueta de passagem do motor em banco fim de linha" },
         { id: "p2", texto: "Identificação metálica com SV do motor" },
@@ -188,9 +187,6 @@
     });
     document.getElementById('data_verificacao').valueAsDate = new Date();
 
-    // ==========================================
-    // NOVO: PAINEL DE DRAFT (EM ANDAMENTO)
-    // ==========================================
     function atualizarListaRascunhos() {
         if (!db) return;
         const request = db.transaction(["rascunhos"], "readonly").objectStore("rascunhos").getAll();
@@ -217,14 +213,12 @@
         iniciarInspecao();
     }
 
-    // ==========================================
-    // 3. INICIAR INSPEÇÃO
-    // ==========================================
     function iniciarInspecao() {
         const sv = document.getElementById('busca_sv').value.trim();
         if(!sv) return;
 
-        // LIMPEZA ABSOLUTA DE SEGURANÇA (Para evitar mistura de motores)
+        finalizando = false; 
+
         document.getElementById('identificacao_se').value = "";
         document.getElementById('comentario_geral').value = "";
         document.getElementById('data_verificacao').valueAsDate = new Date();
@@ -243,13 +237,9 @@
 
         document.getElementById('areaFormulario').classList.remove('d-none');
         
-        // Puxa o rascunho se ele existir
         carregarRascunho(sv);
     }
 
-    // ==========================================
-    // 4. CAPTURA DE FOTOS E AUTO-SAVE LOCAL
-    // ==========================================
     function adicionarFotos(event, perguntaId) {
         const input = event.target;
         Array.from(input.files).forEach(file => {
@@ -291,9 +281,15 @@
         new bootstrap.Modal(document.getElementById('modalFotoZoom')).show();
     }
 
+    function pausarInspecao() {
+        salvarRascunho();
+        alert("⏸️ Inspeção pausada! Ela ficará salva na aba de andamentos.");
+        window.location.reload();
+    }
+
     function salvarRascunho() {
         const sv = document.getElementById('busca_sv').value.trim();
-        if (!sv || !db) return;
+        if (!sv || !db || finalizando) return; 
 
         const respostas = {};
         perguntas.forEach(p => {
@@ -317,7 +313,6 @@
         const store = db.transaction(["rascunhos"], "readwrite").objectStore("rascunhos");
         store.put(dadosParaSalvar);
         
-        // Atualiza a lista de pendentes em tempo real de forma silenciosa
         atualizarListaRascunhos();
     }
 
@@ -349,9 +344,6 @@
         };
     }
 
-    // ==========================================
-    // 5. O MOTOR DE PDF OFFLINE (jsPDF) DE ALTA RESOLUÇÃO
-    // ==========================================
     async function gerarPDFOffline() {
         const sv = document.getElementById('busca_sv').value.trim();
         if(!sv) {
@@ -359,15 +351,16 @@
             return;
         }
 
+        finalizando = true; 
+
         const btn = document.getElementById('btnExportar');
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Processando fotos... (Isto pode levar alguns segundos)';
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Processando fotos...';
         btn.disabled = true;
 
         try {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF('p', 'mm', 'a4'); 
 
-            // 1. Capa do Relatório
             doc.setFontSize(16);
             doc.setFont("helvetica", "bold");
             doc.text(`DOSSIÊ DE QUALIDADE DPU - SV: ${sv}`, 10, 20);
@@ -383,7 +376,6 @@
             const comentario = doc.splitTextToSize(document.getElementById('comentario_geral').value || "Sem observações.", 190);
             doc.text(comentario, 10, 68);
 
-            // 2. Checklist (Tabela Simples)
             let y = Math.max(90, 68 + (comentario.length * 6));
             doc.setFont("helvetica", "bold");
             doc.text(`Resumo do Checklist:`, 10, y);
@@ -391,16 +383,23 @@
             doc.setFontSize(9);
             doc.setFont("helvetica", "normal");
 
+            const respostasExport = {};
             perguntas.forEach(p => {
                 const radio = document.querySelector(`input[name="resp_${p.id}"]:checked`);
                 const resp = radio ? radio.value : "Pendente";
+                
+                respostasExport[p.id] = {
+                    pergunta: p.texto,
+                    resposta: resp,
+                    comentario: document.getElementById(`obs_${p.id}`).value
+                };
+
                 const textoLimpo = p.texto.length > 80 ? p.texto.substring(0, 80) + "..." : p.texto;
                 doc.text(`[ ${resp} ] - ${textoLimpo}`, 10, y);
                 y += 6;
                 if(y > 280) { doc.addPage(); y = 20; }
             });
 
-            // --- Função Canvas Inteligente Blindada ---
             const processarImagem = (file) => {
                 return new Promise((resolve, reject) => {
                     if (!file) return reject(new Error("Arquivo inexistente."));
@@ -429,7 +428,6 @@
                                 
                                 const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
                                 
-                                // Limpeza forçada de memória RAM para evitar crash com muitas fotos
                                 canvas.width = 0;
                                 canvas.height = 0;
                                 img.src = "";
@@ -447,7 +445,6 @@
                 });
             };
 
-            // 3. Anexos Fotográficos
             for (const p of perguntas) {
                 if (arquivosMemoria[p.id] && arquivosMemoria[p.id].length > 0) {
                     for (const file of arquivosMemoria[p.id]) {
@@ -458,7 +455,6 @@
                         const tituloMaiusculo = p.texto.toUpperCase();
                         doc.text(tituloMaiusculo, 10, 15);
 
-                        // Se a imagem falhar, a promessa atira um erro e nós apanhamos no catch
                         const imgDados = await processarImagem(file);
 
                         const pageWidth = doc.internal.pageSize.getWidth();
@@ -479,7 +475,6 @@
                 }
             }
 
-            // 4. Salvar PDF no Histórico Offline Interno
             const nomeArquivoFinal = `DOSSIE_QUALIDADE_SV_${sv}.pdf`;
             const pdfBlob = doc.output('blob');
             
@@ -488,11 +483,11 @@
                 data_verificacao: document.getElementById('data_verificacao').value,
                 inspetor: document.getElementById('identificacao_se').value,
                 arquivo_pdf: pdfBlob,
-                data_criacao: new Date().toLocaleString('pt-BR')
+                data_criacao: new Date().toLocaleString('pt-BR'),
+                respostas_texto: respostasExport
             };
             db.transaction(["historico_pdfs"], "readwrite").objectStore("historico_pdfs").put(registroHistorico);
 
-            // 5. Acionar o Botão de Partilha Nativo
             const arquivoFisico = new File([pdfBlob], nomeArquivoFinal, { type: 'application/pdf' });
 
             if (navigator.canShare && navigator.canShare({ files: [arquivoFisico] })) {
@@ -517,7 +512,6 @@
 
         } catch (error) {
             console.error(error);
-            // AGORA VAMOS VER O VERDADEIRO MOTIVO DO ERRO
             alert(`❌ Falha no Processamento:\n\n${error.message}\n\nVerifique se todas as fotos anexadas são válidas.`);
         }
 
@@ -525,6 +519,11 @@
         btn.disabled = false;
     }
 
+    function apagarRascunhoAoFinalizar(sv) {
+        if (!db) return;
+        db.transaction(["rascunhos"], "readwrite").objectStore("rascunhos").delete(sv);
+        setTimeout(() => { window.location.reload(); }, 2000);
+    }
 </script>
 </body>
 </html>
