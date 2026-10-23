@@ -18,7 +18,7 @@
     <div class="header-hist shadow-sm mb-4 d-flex justify-content-between align-items-center">
         <div>
             <h3 class="fw-bold m-0"><i class="fas fa-archive me-2"></i> Histórico de Dossiês (Qualidade)</h3>
-            <p class="m-0 mt-1 opacity-75">Baixe ou compartilhe os relatórios gerados neste tablet.</p>
+            <p class="m-0 mt-1 opacity-75">Baixe, visualize ou compartilhe os relatórios gerados neste tablet.</p>
         </div>
         <a href="qualidade.html" class="btn btn-outline-light btn-sm fw-bold"><i class="fas fa-plus"></i> Nova Inspeção</a>
     </div>
@@ -50,10 +50,25 @@
     </div>
 </div>
 
+<!-- Modal Resumo Checks -->
+<div class="modal fade" id="modalResumoChecks" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-info text-white border-0">
+                <h5 class="modal-title fw-bold"><i class="fas fa-list-check me-2"></i> Resumo da Inspeção</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4 bg-light" id="corpoResumoChecks">
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     let db;
     let todosDossies = [];
-    const requestDB = indexedDB.open("QualidadeDB", 1);
+    const requestDB = indexedDB.open("QualidadeDB", 2);
 
     requestDB.onsuccess = function(event) {
         db = event.target.result;
@@ -77,7 +92,6 @@
         request.onsuccess = function(event) {
             todosDossies = event.target.result;
             
-            // Ordenar do mais recente para o mais antigo
             todosDossies.sort((a, b) => {
                 if(a.data_criacao && b.data_criacao) {
                     return b.data_criacao.localeCompare(a.data_criacao);
@@ -99,17 +113,23 @@
         }
 
         lista.forEach(dossie => {
+            const dataInspecao = dossie.data_verificacao || "N/A";
+            const inspetorNome = dossie.inspetor || "N/A";
+            
             tbody.innerHTML += `
                 <tr>
                     <td class="fw-bold text-primary fs-5">${dossie.sv}</td>
-                    <td class="fw-bold">${dossie.data_verificacao || "N/A"}</td>
-                    <td>${dossie.inspetor || "N/A"}</td>
+                    <td class="fw-bold">${dataInspecao}</td>
+                    <td>${inspetorNome}</td>
                     <td class="text-muted small">${dossie.data_criacao || "N/A"}</td>
                     <td class="text-end">
+                        <button class="btn btn-info btn-sm fw-bold shadow-sm me-1 text-white" onclick="verResumoChecks('${dossie.sv}')" title="Ver Respostas">
+                            <i class="fas fa-eye"></i>
+                        </button>
                         <button class="btn btn-primary btn-sm fw-bold shadow-sm me-1" onclick="compartilharPDF('${dossie.sv}')" title="Enviar para OneDrive">
                             <i class="fas fa-share-nodes"></i>
                         </button>
-                        <button class="btn btn-danger btn-sm fw-bold shadow-sm" onclick="baixarPDF('${dossie.sv}')" title="Baixar">
+                        <button class="btn btn-danger btn-sm fw-bold shadow-sm" onclick="baixarPDF('${dossie.sv}')" title="Baixar PDF">
                             <i class="fas fa-file-pdf"></i>
                         </button>
                     </td>
@@ -126,6 +146,36 @@
                    (d.inspetor && d.inspetor.toLowerCase().includes(termo));
         });
         renderizarTabela(listaFiltrada);
+    }
+
+    function verResumoChecks(sv) {
+        const transaction = db.transaction(["historico_pdfs"], "readonly");
+        const request = transaction.objectStore("historico_pdfs").get(sv);
+
+        request.onsuccess = function(event) {
+            const dossie = event.target.result;
+            const corpo = document.getElementById("corpoResumoChecks");
+            corpo.innerHTML = "";
+
+            if (!dossie || !dossie.respostas_texto) {
+                corpo.innerHTML = `<div class="alert alert-warning text-center">⚠️ Os dados deste checklist são antigos ou não foram guardados em modo texto. Baixe o PDF para visualizar.</div>`;
+            } else {
+                let htmlResumo = `<h6 class="fw-bold text-primary border-bottom pb-2 mb-3">SV: ${sv} | Inspetor: ${dossie.inspetor}</h6>`;
+                
+                Object.values(dossie.respostas_texto).forEach((r, i) => {
+                    let corBadge = r.resposta.includes("OK") ? "bg-success" : (r.resposta.includes("NOK") ? "bg-danger" : "bg-secondary");
+                    htmlResumo += `
+                        <div class="mb-3 p-3 bg-white border rounded shadow-sm">
+                            <p class="fw-bold mb-2 small text-dark">${i+1}. ${r.pergunta}</p>
+                            <span class="badge ${corBadge} fs-6 mb-2">${r.resposta}</span>
+                            <p class="text-muted small m-0 fst-italic">Obs: ${r.comentario || "Nenhuma"}</p>
+                        </div>
+                    `;
+                });
+                corpo.innerHTML = htmlResumo;
+            }
+            new bootstrap.Modal(document.getElementById('modalResumoChecks')).show();
+        };
     }
 
     function baixarPDF(sv) {
@@ -150,7 +200,6 @@
         };
     }
 
-    // NOVA FUNÇÃO: COMPARTILHAR DIRETO DO HISTÓRICO
     async function compartilharPDF(sv) {
         const transaction = db.transaction(["historico_pdfs"], "readonly");
         const store = transaction.objectStore("historico_pdfs");
@@ -173,7 +222,7 @@
                         console.log("Compartilhamento cancelado", error);
                     }
                 } else {
-                    alert("⚠️ O seu tablet não suporta compartilhar arquivos grandes desta forma. Utilize o botão vermelho para Baixar.");
+                    alert("⚠️ O seu tablet não suporta compartilhar arquivos grandes desta forma. Utilize o botão para Baixar.");
                 }
             } else {
                 alert("❌ Erro: O arquivo PDF não foi encontrado no banco de dados.");
