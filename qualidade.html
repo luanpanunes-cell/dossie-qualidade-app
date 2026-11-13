@@ -254,6 +254,9 @@
     function renderizarMiniaturas(perguntaId) {
         const container = document.getElementById(`preview_${perguntaId}`);
         container.innerHTML = "";
+        
+        if (!arquivosMemoria[perguntaId]) return;
+
         arquivosMemoria[perguntaId].forEach(file => {
             const reader = new FileReader();
             reader.onload = function(e) {
@@ -266,7 +269,10 @@
                 `;
                 container.appendChild(div);
             };
-            reader.readAsDataURL(file);
+            
+            if (file instanceof Blob || file instanceof File) {
+                reader.readAsDataURL(file);
+            }
         });
     }
 
@@ -326,9 +332,10 @@
                 document.getElementById('identificacao_se').value = dados.identificacao_se || "";
                 document.getElementById('comentario_geral').value = dados.comentario_geral || "";
                 
-                arquivosMemoria = dados.fotos || {};
+                arquivosMemoria = {};
+                
                 perguntas.forEach(p => {
-                    if(!arquivosMemoria[p.id]) arquivosMemoria[p.id] = [];
+                    arquivosMemoria[p.id] = (dados.fotos && dados.fotos[p.id]) ? dados.fotos[p.id] : [];
                     renderizarMiniaturas(p.id);
 
                     if (dados.respostas && dados.respostas[p.id]) {
