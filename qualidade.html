@@ -118,6 +118,7 @@
             db.createObjectStore("historico_pdfs", { keyPath: "sv" });
         }
     };
+    
     requestDB.onsuccess = function(event) { 
         db = event.target.result; 
         atualizarListaRascunhos(); 
@@ -243,30 +244,32 @@
     function adicionarFotos(event, perguntaId) {
         const input = event.target;
         Array.from(input.files).forEach(file => {
-            file.uid = Math.random().toString(36).substr(2, 9);
-            arquivosMemoria[perguntaId].push(file);
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                arquivosMemoria[perguntaId].push({
+                    uid: Math.random().toString(36).substr(2, 9),
+                    base64: e.target.result,
+                    nome: file.name
+                });
+                renderizarMiniaturas(perguntaId);
+                salvarRascunho(); 
+            };
+            reader.readAsDataURL(file);
         });
         input.value = ""; 
-        renderizarMiniaturas(perguntaId);
-        salvarRascunho();
     }
 
     function renderizarMiniaturas(perguntaId) {
         const container = document.getElementById(`preview_${perguntaId}`);
         container.innerHTML = "";
-        arquivosMemoria[perguntaId].forEach(file => {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const imgDataUrl = e.target.result;
-                const div = document.createElement('div');
-                div.className = 'thumb-container';
-                div.innerHTML = `
-                    <img src="${imgDataUrl}" onclick="verFotoModal('${imgDataUrl}')">
-                    <button type="button" class="thumb-remove" onclick="removerFoto('${perguntaId}', '${file.uid}')"><i class="fas fa-times"></i></button>
-                `;
-                container.appendChild(div);
-            };
-            reader.readAsDataURL(file);
+        arquivosMemoria[perguntaId].forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'thumb-container';
+            div.innerHTML = `
+                <img src="${item.base64}" onclick="verFotoModal('${item.base64}')">
+                <button type="button" class="thumb-remove" onclick="removerFoto('${perguntaId}', '${item.uid}')"><i class="fas fa-times"></i></button>
+            `;
+            container.appendChild(div);
         });
     }
 
@@ -400,54 +403,49 @@
                 if(y > 280) { doc.addPage(); y = 20; }
             });
 
-            const processarImagem = (file) => {
+            const processarImagemBase64 = (base64Str) => {
                 return new Promise((resolve, reject) => {
-                    if (!file) return reject(new Error("Arquivo inexistente."));
+                    if (!base64Str) return reject(new Error("Imagem inexistente."));
+                    
+                    const img = new Image();
+                    img.onload = () => {
+                        try {
+                            const canvas = document.createElement('canvas');
+                            const MAX_WIDTH = 1200;
+                            const MAX_HEIGHT = 1200;
+                            let width = img.width;
+                            let height = img.height;
 
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        const img = new Image();
-                        img.onload = () => {
-                            try {
-                                const canvas = document.createElement('canvas');
-                                const MAX_WIDTH = 1200;
-                                const MAX_HEIGHT = 1200;
-                                let width = img.width;
-                                let height = img.height;
-
-                                if (width > height) {
-                                    if (width > MAX_WIDTH) { height = Math.round(height * (MAX_WIDTH / width)); width = MAX_WIDTH; }
-                                } else {
-                                    if (height > MAX_HEIGHT) { width = Math.round(width * (MAX_HEIGHT / height)); height = MAX_HEIGHT; }
-                                }
-
-                                canvas.width = width;
-                                canvas.height = height;
-                                const ctx = canvas.getContext('2d');
-                                ctx.drawImage(img, 0, 0, width, height);
-                                
-                                const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
-                                
-                                canvas.width = 0;
-                                canvas.height = 0;
-                                img.src = "";
-                                
-                                resolve({ src: dataUrl, w: width, h: height });
-                            } catch (err) {
-                                reject(new Error("Falha ao comprimir a imagem no Canvas."));
+                            if (width > height) {
+                                if (width > MAX_WIDTH) { height = Math.round(height * (MAX_WIDTH / width)); width = MAX_WIDTH; }
+                            } else {
+                                if (height > MAX_HEIGHT) { width = Math.round(width * (MAX_HEIGHT / height)); height = MAX_HEIGHT; }
                             }
-                        };
-                        img.onerror = () => reject(new Error(`O arquivo '${file.name}' não é uma imagem válida.`));
-                        img.src = e.target.result;
+
+                            canvas.width = width;
+                            canvas.height = height;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, width, height);
+                            
+                            const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+                            
+                            canvas.width = 0;
+                            canvas.height = 0;
+                            img.src = "";
+                            
+                            resolve({ src: dataUrl, w: width, h: height });
+                        } catch (err) {
+                            reject(new Error("Falha ao comprimir a imagem no Canvas."));
+                        }
                     };
-                    reader.onerror = () => reject(new Error("Falha de leitura no disco/memória do tablet."));
-                    reader.readAsDataURL(file);
+                    img.onerror = () => reject(new Error(`O arquivo corrompeu ou não é uma imagem válida.`));
+                    img.src = base64Str;
                 });
             };
 
             for (const p of perguntas) {
                 if (arquivosMemoria[p.id] && arquivosMemoria[p.id].length > 0) {
-                    for (const file of arquivosMemoria[p.id]) {
+                    for (const item of arquivosMemoria[p.id]) {
                         doc.addPage();
                         
                         doc.setFontSize(10);
@@ -455,7 +453,7 @@
                         const tituloMaiusculo = p.texto.toUpperCase();
                         doc.text(tituloMaiusculo, 10, 15);
 
-                        const imgDados = await processarImagem(file);
+                        const imgDados = await processarImagemBase64(item.base64);
 
                         const pageWidth = doc.internal.pageSize.getWidth();
                         const pageHeight = doc.internal.pageSize.getHeight();
@@ -527,7 +525,3 @@
 </script>
 </body>
 </html>
-
-
-
-
