@@ -18,10 +18,11 @@
         .btn-check:checked + .btn-outline-success { background-color: #198754; color: white; }
         
         .thumb-container { position: relative; width: 65px; height: 65px; border-radius: 6px; overflow: hidden; border: 1px solid #ced4da; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; margin-right: 5px; margin-bottom: 5px; display: inline-block;}
-        .thumb-container img { width: 100%; height: 100%; object-fit: cover; cursor: pointer; }
+        .thumb-container img { width: 100%; height: 100%; object-fit: cover; cursor: pointer; background-color: #e9ecef; }
         .thumb-remove { position: absolute; top: 0; right: 0; background: rgba(220, 53, 69, 0.9); color: white; border: none; font-size: 11px; width: 22px; height: 22px; line-height: 22px; text-align: center; cursor: pointer; border-bottom-left-radius: 4px; }
         
         #statusConexao { font-size: 0.85rem; padding: 5px 10px; border-radius: 20px; font-weight: bold; }
+        .loading-text { font-size: 0.85rem; color: #0d6efd; font-weight: bold; margin-top: 5px; }
     </style>
 </head>
 <body class="p-4">
@@ -177,6 +178,7 @@
                             <span class="input-group-text bg-light"><i class="fas fa-camera"></i></span>
                             <input type="file" class="form-control" accept="image/*" multiple onchange="adicionarFotos(event, '${p.id}')">
                         </div>
+                        <div id="loading_${p.id}" class="loading-text d-none"><i class="fas fa-spinner fa-spin"></i> Processando e comprimindo fotos...</div>
                         <div id="preview_${p.id}" class="mt-2"></div>
                     </div>
                     <div class="col-md-6">
@@ -241,45 +243,114 @@
         carregarRascunho(sv);
     }
 
-    function adicionarFotos(event, perguntaId) {
-        const input = event.target;
-        Array.from(input.files).forEach(file => {
+    const comprimirNaEntrada = (file) => {
+        return new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = function(e) {
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        const MAX_WIDTH = 1200;
+                        const MAX_HEIGHT = 1200;
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > height) {
+                            if (width > MAX_WIDTH) { height = Math.round(height * (MAX_WIDTH / width)); width = MAX_WIDTH; }
+                        } else {
+                            if (height > MAX_HEIGHT) { width = Math.round(width * (MAX_HEIGHT / height)); height = MAX_HEIGHT; }
+                        }
+
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        
+                        const base64Comprimido = canvas.toDataURL('image/jpeg', 0.65);
+                        
+                        canvas.width = 0; canvas.height = 0; img.src = "";
+                        
+                        resolve(base64Comprimido);
+                    } catch (err) {
+                        reject(new Error("Falha no Canvas"));
+                    }
+                };
+                img.onerror = () => reject(new Error("Falha na imagem"));
+                img.src = e.target.result;
+            };
+            reader.onerror = () => reject(new Error("Falha de leitura"));
+            reader.readAsDataURL(file); 
+        });
+    };
+
+    async function adicionarFotos(event, perguntaId) {
+        const input = event.target;
+        if (!input.files || input.files.length === 0) return;
+
+        // TRAVA DE SEGURANÇA: Limite de 10 fotos por lote
+        if (input.files.length > 10) {
+            alert("⚠️ Selecione no máximo 10 fotos por vez. O tablet pode travar se tentar carregar muitas imagens pesadas ao mesmo tempo.");
+            input.value = "";
+            return;
+        }
+
+        const loadingDiv = document.getElementById(`loading_${perguntaId}`);
+        loadingDiv.classList.remove('d-none');
+
+        // Loop ASSÍNCRONO: Força o navegador a terminar de processar uma foto antes de começar a próxima
+        for (const file of Array.from(input.files)) {
+            try {
+                const base64Leve = await comprimirNaEntrada(file);
                 arquivosMemoria[perguntaId].push({
                     uid: Math.random().toString(36).substr(2, 9),
-                    base64: e.target.result,
+                    base64: base64Leve,
                     nome: file.name
                 });
-                renderizarMiniaturas(perguntaId);
-                salvarRascunho(); 
-            };
-            reader.readAsDataURL(file);
-        });
+            } catch (erro) {
+                console.error(`Erro ao carregar ${file.name}:`, erro);
+            }
+        }
+
+        loadingDiv.classList.add('d-none');
+        renderizarMiniaturas(perguntaId);
+        salvarRascunho(); 
         input.value = ""; 
     }
 
     function renderizarMiniaturas(perguntaId) {
         const container = document.getElementById(`preview_${perguntaId}`);
         container.innerHTML = "";
+        
+        if(!arquivosMemoria[perguntaId]) return;
+
         arquivosMemoria[perguntaId].forEach(item => {
+            const base64Src = item.base64 || ""; // Previne null
+            const uidSeguro = item.uid || "undefined";
+
             const div = document.createElement('div');
             div.className = 'thumb-container';
             div.innerHTML = `
-                <img src="${item.base64}" onclick="verFotoModal('${item.base64}')">
-                <button type="button" class="thumb-remove" onclick="removerFoto('${perguntaId}', '${item.uid}')"><i class="fas fa-times"></i></button>
+                <img src="${base64Src}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 100 100\\'><text x=\\'25\\' y=\\'55\\' font-size=\\'40\\'>❓</text></svg>'" onclick="verFotoModal('${base64Src}')">
+                <button type="button" class="thumb-remove" onclick="removerFoto('${perguntaId}', '${uidSeguro}')"><i class="fas fa-times"></i></button>
             `;
             container.appendChild(div);
         });
     }
 
     function removerFoto(perguntaId, fileUid) {
-        arquivosMemoria[perguntaId] = arquivosMemoria[perguntaId].filter(f => f.uid !== fileUid);
+        // Correção Crítica: Força a comparação das variáveis como Texto (String) 
+        // Isso permite apagar arquivos corrompidos cujo UID virou "undefined" no cache.
+        arquivosMemoria[perguntaId] = arquivosMemoria[perguntaId].filter(f => {
+            return String(f.uid) !== String(fileUid);
+        });
+        
         renderizarMiniaturas(perguntaId);
         salvarRascunho();
     }
 
     function verFotoModal(src) {
+        if(!src || src === "") return;
         document.getElementById('imgZoom').src = src;
         new bootstrap.Modal(document.getElementById('modalFotoZoom')).show();
     }
@@ -357,7 +428,7 @@
         finalizando = true; 
 
         const btn = document.getElementById('btnExportar');
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Processando fotos...';
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Montando PDF...';
         btn.disabled = true;
 
         try {
@@ -403,42 +474,12 @@
                 if(y > 280) { doc.addPage(); y = 20; }
             });
 
-            const processarImagemBase64 = (base64Str) => {
-                return new Promise((resolve, reject) => {
-                    if (!base64Str) return reject(new Error("Imagem inexistente."));
-                    
+            // Como as fotos já estão comprimidas na memória, essa etapa ficou hiper rápida
+            const lerImagemDimensao = (base64Str) => {
+                return new Promise((resolve) => {
                     const img = new Image();
-                    img.onload = () => {
-                        try {
-                            const canvas = document.createElement('canvas');
-                            const MAX_WIDTH = 1200;
-                            const MAX_HEIGHT = 1200;
-                            let width = img.width;
-                            let height = img.height;
-
-                            if (width > height) {
-                                if (width > MAX_WIDTH) { height = Math.round(height * (MAX_WIDTH / width)); width = MAX_WIDTH; }
-                            } else {
-                                if (height > MAX_HEIGHT) { width = Math.round(width * (MAX_HEIGHT / height)); height = MAX_HEIGHT; }
-                            }
-
-                            canvas.width = width;
-                            canvas.height = height;
-                            const ctx = canvas.getContext('2d');
-                            ctx.drawImage(img, 0, 0, width, height);
-                            
-                            const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
-                            
-                            canvas.width = 0;
-                            canvas.height = 0;
-                            img.src = "";
-                            
-                            resolve({ src: dataUrl, w: width, h: height });
-                        } catch (err) {
-                            reject(new Error("Falha ao comprimir a imagem no Canvas."));
-                        }
-                    };
-                    img.onerror = () => reject(new Error(`O arquivo corrompeu ou não é uma imagem válida.`));
+                    img.onload = () => resolve({ src: base64Str, w: img.width, h: img.height });
+                    img.onerror = () => resolve(null);
                     img.src = base64Str;
                 });
             };
@@ -446,14 +487,17 @@
             for (const p of perguntas) {
                 if (arquivosMemoria[p.id] && arquivosMemoria[p.id].length > 0) {
                     for (const item of arquivosMemoria[p.id]) {
+                        if (!item.base64 || item.base64 === "") continue;
+
+                        const imgDados = await lerImagemDimensao(item.base64);
+                        if (!imgDados) continue; // Pula fotos que corromperam
+
                         doc.addPage();
                         
                         doc.setFontSize(10);
                         doc.setFont("helvetica", "bold");
                         const tituloMaiusculo = p.texto.toUpperCase();
                         doc.text(tituloMaiusculo, 10, 15);
-
-                        const imgDados = await processarImagemBase64(item.base64);
 
                         const pageWidth = doc.internal.pageSize.getWidth();
                         const pageHeight = doc.internal.pageSize.getHeight();
@@ -497,7 +541,6 @@
                     });
                     apagarRascunhoAoFinalizar(sv);
                 } catch (error) {
-                    console.log("Compartilhamento cancelado ou falhou.", error);
                     doc.save(nomeArquivoFinal);
                     alert(`✅ Guardado em Downloads: ${nomeArquivoFinal}`);
                     apagarRascunhoAoFinalizar(sv);
@@ -510,7 +553,7 @@
 
         } catch (error) {
             console.error(error);
-            alert(`❌ Falha no Processamento:\n\n${error.message}\n\nVerifique se todas as fotos anexadas são válidas.`);
+            alert(`❌ Falha no Processamento:\n\n${error.message}`);
         }
 
         btn.innerHTML = '<i class="fas fa-file-pdf me-2"></i> FINALIZAR E COMPARTILHAR PDF';
